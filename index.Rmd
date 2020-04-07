@@ -41,7 +41,7 @@ To estimate NPP we will use the growing season NDVI small integral, which will b
 
 The NDVI data used was the GIMMS NDVI3g.v1, downloaded from the [ECOCAST archive](https://climatedataguide.ucar.edu/climate-data/ndvi-normalized-difference-vegetation-index-3rd-generation-nasagfsc-gimms). Precipitation data came from the Climate Hazards Group InfraRed Precipitation with Station data (CHIRPS), which can be found [here](https://www.chc.ucsb.edu/data/chirps).
 
-As computing the growing season NDVI small integral and precipitation sum would take too long, we already provide [here](https://drive.google.com/open?id=1QmzgtuKSVGJGoRaKwu0aL-p4JR2sCWxr) the time series of (1) monthly NDVI, (2) annual growing season NDVI integral and (3) annual precipitation sum during the growing season, for six dryland areas (the coordinates of those areas are also provided in "Area_coordinates.csv").
+As computing the growing season NDVI small integral and precipitation sum would take too long, we will already provide the time series of (1) monthly NDVI, (2) annual growing season NDVI integral and (3) annual precipitation sum during the growing season, for six dryland areas (the coordinates of those areas are also provided in "Area_coordinates.csv").
 
 First of all, we have to set our working directory, install the necessary packages and load some functions. How to do it is explained in the next section.
 
@@ -82,7 +82,7 @@ for (package in neededPackages){pkgTest(package)}
 
 ## Downloading the data
 
-The link to the dataset used in this exercise is [here](https://raw.github.com/paulonbernardino/Exercises/master/BFAST01_new_typo_exercise/data/data.zip)
+The link to the dataset used in this exercise is [here](https://raw.github.com/paulonbernardino/BFAST01_new_typo_exercise/master/data/data.zip)
 
 You can use the link to download the dataset, and unzip it, without leaving the R environment. But first, we need to create a folder to store the data.
 
@@ -91,14 +91,14 @@ You can use the link to download the dataset, and unzip it, without leaving the 
 ifelse(!dir.exists(file.path("data")), dir.create(file.path("data")), FALSE)
 
 ## Download files and save them in the data folder
-download.file(url="https://raw.github.com/paulonbernardino/Exercises/master/BFAST01_new_typo_exercise/data/data.zip", destfile="data/dataset.zip", method="auto")
+download.file(url="https://raw.github.com/paulonbernardino/BFAST01_new_typo_exercise/master/data/data.zip", destfile="data/dataset.zip", method="auto")
 unzip("data/dataset.zip", exdir="data")
 ```
 
 Next, we also need the functions inside the "functions.R" script. So let's download it from the Github repository and load the functions to the Environment, so they can be used in our RStudio session:
 
 ```{r, message = FALSE}
-download.file(url="https://raw.github.com/paulonbernardino/Exercises/master/BFAST01_new_typo_exercise/functions.R", destfile="functions.R", method="auto")
+download.file(url="https://raw.github.com/paulonbernardino/BFAST01_new_typo_exercise/master/functions.R", destfile="functions.R", method="auto")
 source("functions.R")
 ```
 
