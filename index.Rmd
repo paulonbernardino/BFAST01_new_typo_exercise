@@ -1,0 +1,710 @@
+---
+title: "Detecting and characterizing turning points using BFAST01"
+author: "Paulo N Bernardino"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  knitrBootstrap::bootstrap_document:
+    theme: "simplex"
+    highlight: Tomorrow Night Bright
+    menu: FALSE
+    theme.chooser: TRUE
+    highlight.chooser: TRUE
+---
+
+# Detecting and characterizing turning points using BFAST01
+
+Paulo N Bernardino (paulo.nbernardino@gmail.com)
+
+[Division Forest, Nature and Landscape, KU Leuven](https://ees.kuleuven.be/fnl/staff/index.html?intranet=u0115271)
+
+[Laboratory of Geo-information Science and Remote Sensing, Wageningen UR](https://www.wur.nl/en/Persons/Paulo-P-Paulo-Negri-Bernardino-MSc.htm)
+
+```{r, eval=TRUE, echo=TRUE, include=TRUE, results='asis'}
+format(Sys.time(), '%d-%m-%Y')
+```
+# Abrupt changes in dryland ecosystem functioning
+
+Drylands ecosystems are important - covering 40% of the Earth's surface, accounting for approximately 40% of the global net primary productivity and supporting more than 30% of the population - but are largely under pressure. They are subjected to ongoing global change, devastating climate extremes and unsustainable use of natural resources. These have led in the past to major alterations in functioning and land degradation, threatening the ability of the ecosystems to provide resources and services to the communities and resulting in increased poverty and food insecurity. 
+
+Changes in the functioning of an ecosystem can take place abruptly, rather than gradually. For instance, when rainfall levels of a region decrease slowly for some years, it is likely that a decreasing trend in ecosystem functioning will also be observed; while when an extreme drought strikes a region, it is likely that an abrupt drop in ecosystem functioning will occur. 
+The goals of this exercise are: (i) assess and characterize gradual/abrupt changes in ecosystem functioning over six dryland areas and (ii) gain insights in the potential drivers of these changes (i.e., are the changes likely driven by anthropogenic or climatic pressure?).
+
+## How can we estimate ecosystem functioning in drylands?
+
+Environmental sciences researchers that work with Earth Observation data are used to work with traditional vegetation indices, like the NDVI, and with precipitation data. But is NDVI a good proxy for ecosystem functioning? Do abrupt changes in NDVI time series reflect changes in the functioning of the ecosystem? 
+
+We will here use the Rain-Use Efficiency (RUE), a key indicator for measuring the response of plant production to precipitation, calculated as the ratio between Net Primary Productivity (NPP) and precipitation. The detection of major breakpoints in RUE time series indicates that the ecosystem response to precipitation has changed significantly through time and, ultimately, that the ecosystem underwent a turning point in ecosystem functioning.
+
+To estimate NPP we will use the growing season NDVI small integral, which will be divided by the sum of precipitation during the growing season months to derive the annual RUE time series. 
+
+![](figs/sint.png)
+
+The NDVI data used was the GIMMS NDVI3g.v1, downloaded from the [ECOCAST archive](https://climatedataguide.ucar.edu/climate-data/ndvi-normalized-difference-vegetation-index-3rd-generation-nasagfsc-gimms). Precipitation data came from the Climate Hazards Group InfraRed Precipitation with Station data (CHIRPS), which can be found [here](https://www.chc.ucsb.edu/data/chirps).
+
+As computing the growing season NDVI small integral and precipitation sum would take too long, we will already provide the time series of (1) monthly NDVI, (2) annual growing season NDVI integral and (3) annual precipitation sum during the growing season, for six dryland areas (the coordinates of those areas are also provided in "Area_coordinates.csv").
+
+First of all, we have to set our working directory, install the necessary packages and load some functions. How to do it is explained in the next section.
+
+
+# Getting started
+
+First, choose your working directory (i.e., a folder on your hard drive) to which the  data will be downloaded and where you will save your R script.
+
+```{block type="alert alert-info"}
+**Protip**: Do not hard code `setwd()` in your R script as the path might be different on another computer, and therefore your script will not be fully reproducible by others.
+```
+
+In RStudio you can set your working directory this way, if you have saved your R script to your working directory:
+
+![](figs/setwd_rstudiotip.png)
+
+Check your working directory by
+
+```{r, eval = FALSE}
+getwd() # check if your working directory is correctly set
+```
+
+The necessary add-on packages need to be installed within R before loading the package using the `library()` function. Below, we define a helper function that installs the R package if it is not installed yet, and then also loads it using the `library` function:
+
+```{r, echo=TRUE, message=FALSE, eval=TRUE}
+# pkgTest is a helper function to load packages and install packages only when they are not installed yet.
+pkgTest <- function(x)
+{
+  if (x %in% rownames(installed.packages()) == FALSE) {
+    install.packages(x, dependencies= TRUE)
+  }
+  library(x, character.only = TRUE)
+}
+neededPackages <- c("strucchange","zoo", "bfast", "raster", "rgdal")
+for (package in neededPackages){pkgTest(package)}
+```
+
+
+## Downloading the data
+
+The link to the dataset used in this exercise is [here](https://raw.github.com/paulonbernardino/BFAST01_new_typo_exercise/master/data/data.zip)
+
+You can use the link to download the dataset, and unzip it, without leaving the R environment. But first, we need to create a folder to store the data.
+
+```{r, message = FALSE}
+## Create "data" folder, if it doesn't exist already
+ifelse(!dir.exists(file.path("data")), dir.create(file.path("data")), FALSE)
+
+## Download files and save them in the data folder
+download.file(url="https://raw.github.com/paulonbernardino/BFAST01_new_typo_exercise/master/data/data.zip", destfile="data/dataset.zip", method="auto")
+unzip("data/dataset.zip", exdir="data")
+```
+
+Next, we also need the functions inside the "functions.R" script. So let's download it from the Github repository and load the functions to the Environment, so they can be used in our RStudio session:
+
+```{r, message = FALSE}
+download.file(url="https://raw.github.com/paulonbernardino/BFAST01_new_typo_exercise/master/functions.R", destfile="functions.R", method="auto")
+source("functions.R")
+```
+
+Now that all the data is downloaded, we can load it into R.
+
+```{r, message = FALSE}
+## List files inside the data folder
+files <- list.files("data", pattern="*.csv", full.names = TRUE)
+## Read files as data frames
+coordinates <- read.csv(files[1], header=T, sep=";")
+rainfall <- read.csv(files[2], header=T, sep=";")
+ndvi <- read.csv(files[3], header=T, sep=";")
+ndvi_sint <- read.csv(files[4], header=T, sep=";")
+```
+
+## Visualizing time series
+
+Let's see how the time series of vegetation greenness looks like for study area #6. Our data ranges from Jan-1982 to Dec-2015, and as we have monthly NDVI data, we should have in total 408 columns (1 for each month) and 6 rows (1 for each study area) in the data frame.
+
+```{r, echo=TRUE, message = FALSE}
+ncol(ndvi)
+nrow(ndvi)
+```
+
+So we can create a time series starting at 01-1982, ending at 12-2015, and with a monthly (12) frequency:
+
+```{r, echo=TRUE, message = FALSE, fig.width=12}
+## Create time series object
+ts6_ndvi <- ts(as.numeric(ndvi[6,]), start=c(1982,01), end=c(2015,12), frequency=12)
+## Plot time series
+par(mar = c(5,5,2,5)) # adjust margins
+plot(ts6_ndvi, main="Study area 6", bty="n", axes = FALSE, cex.main = 1.7, xlab = "", ylab = "")
+axis(1, cex.axis = 1.5); mtext("Time", side = 1, line = 3, cex = 1.6)
+axis(2, cex.axis = 1.5); mtext("NDVI", side = 2, line = 3, cex = 1.6)
+```
+
+The NDVI small integral and precipitation sum, in turn, are annual, so the time series will have fewer time steps.
+
+```{r, echo=TRUE, message = FALSE}
+## Create time series objects
+ts6_ndvisint <- ts(as.numeric(ndvi_sint[6,]), start=1982, end=2015, frequency=1)
+ts6_rain <- ts(as.numeric(rainfall[6,]), start=1982, end=2015, frequency=1)
+
+## Plot time series
+par(mar = c(5,5,2,5))
+# First plot the NDVI small integral
+plot(ts6_ndvisint, ylab="NDVI small integral", main="Study area 6", bty="n")
+# Call a new plot, on top of the one already plotted
+par(new = TRUE)
+plot(ts6_rain, axes = FALSE, xlab = NA, ylab = NA, type = "l", lty = 5, col = "blue", ylim = c(280, 740))
+axis(side = 4) # add the axis for the precipitation data
+mtext(side = 4, line = 3, "Sum of precipitation (mm)") # add the label
+legend("bottomright", cex = 0.8, legend = c("NDVI", "Precipitation"), col = c("black", "blue"), lty= c(1,5), bty="n") # add a legend
+```
+
+```{block, type="alert alert-success"}
+> **Question 1**: Can you see any interesting patterns in the time series? What happens towards the end? Are both time series increasing at the same rate?
+```
+
+# Detecting turning points in ecosystem functioning
+
+As discussed above, abrupt changes in RUE time series indicate points in time when the ecosystem response to precipitation changed significantly, and thus, turning points (TPs) in ecosystem functioning. To detect abrupt changes, we can use the BFAST function ( [Verbesselt et al., 2010](https://www.sciencedirect.com/science/article/abs/pii/S003442570900265X)). But first, we need to derive RUE using the data provided.
+
+## Deriving RUE
+
+This step is rather simple, as we already have both the NPP estimates (growing season NDVI small integral) and the sum of precipitation data. We just need to divide one by the other:
+
+```{r, echo=TRUE, message = FALSE}
+ts6_rue <- ts6_ndvisint/ts6_rain
+plot(ts6_rue*1000, ylab="RUE", main="Study area 6", bty="n")
+```
+
+## Using BFAST01 to detect turning points
+
+Now we can finally check if there was a TP in our first study area. Instead of the regular BFAST function, we will here use BFAST01, which focus only on the single major break in the time series, and also allows the characterization of the detected changes. 
+
+```{block type="alert alert-info"}
+**Protip**: Look at `?bfast01` for more details. Here, we used a `response~trend` model, as our time series is annual and thus, doesn't have (intra-annual) seasonality. 
+```
+
+```{r, echo=FALSE, results="hide"}
+bfastpp<- function(data, order = 3,
+                   lag = NULL, slag = NULL, na.action = na.omit,
+                   stl = c("none", "trend", "seasonal", "both"),
+                   decomp = c("stl", "stlplus"), sbins = 1)
+{
+  decomp <- match.arg(decomp)
+  stl <- match.arg(stl)
+  if (stl != "none" && decomp == "stlplus" && !requireNamespace("stlplus", quietly = TRUE))
+    stop("Please install the stlplus package or set decomp = 'stl' or stl = 'none'.")
+
+  ## double check what happens with 29-02 if that happens...
+  ## we should keep it simple an remove the datum if that happens
+  
+  if(!is.ts(data)) data <- as.ts(data)
+  
+  ## STL pre-processing to try to adjust for trend or season
+  stl <- match.arg(stl)
+  if(stl != "none") {
+    stl_adjust <- function(x) {
+      x_stl <- if (decomp=="stlplus") {
+        stlplus::stlplus(x, s.window = "periodic")$data
+      } else {
+        stats::stl(x, s.window = "periodic")$time.series
+      }
+      switch(stl,
+             "trend" = x - x_stl[, "trend"],
+             "seasonal" = x - x_stl[, "seasonal"],
+             "both" = x - x_stl[, "trend"] - x_stl[, "seasonal"])
+    }
+    if(NCOL(data) > 1L) {
+      for(i in 1:NCOL(data)) data[,i] <- stl_adjust(data[,i])
+    } else {
+      data <- stl_adjust(data)
+    }
+  }
+  
+  ## check for covariates
+  if(NCOL(data) > 1L) {
+    x <- coredata(data)[, -1L]
+    y <- data[, 1L]
+  } else {
+    x <- NULL
+    y <- data
+  }
+  
+  ## data with trend and season factor
+  seasonfreq <- if (sbins > 1) sbins else frequency(y)*sbins
+  
+  rval <- data.frame(
+    time = as.numeric(time(y)),
+    response = y,
+    trend = 1:NROW(y),
+    season = if (seasonfreq > 1) cut(cycle(y), seasonfreq, ordered_result = TRUE) else factor("no seasonality")
+  )
+  
+  ## set up harmonic trend matrix as well
+  freq <- frequency(y)
+  order <- min(freq, order)
+  harmon <- outer(2 * pi * as.vector(time(y)), 1:order)
+  harmon <- cbind(apply(harmon, 2, cos), apply(harmon, 2, sin))
+  colnames(harmon) <- if(order == 1) {
+    c("cos", "sin")
+  } else {
+    c(paste("cos", 1:order, sep = ""), paste("sin", 1:order, sep = ""))
+  }
+  if((2 * order) == freq) harmon <- harmon[, -(2 * order)]
+  rval$harmon <- harmon
+  
+  ## add lags
+  nalag <- function(x, k) c(rep(NA, k), head(x, -k))
+  if(!is.null(lag)) {
+    rval$lag <- sapply(lag, function(k) nalag(as.vector(y), k))
+    colnames(rval$lag) <- lag
+  }
+  if(!is.null(slag)) {
+    rval$slag <- sapply(slag * freq, function(k) nalag(as.vector(y), k))
+    colnames(rval$slag) <- slag
+  }
+  
+  ## add regressors
+  rval$xreg <- x
+  
+  ## omit missing values
+  rval <- na.action(rval)
+  
+  ## return everything
+  return(rval)
+}
+bfast01 <- function(data, formula = NULL,
+                    test = "OLS-MOSUM", level = 0.05, aggregate = all,
+                    trim = NULL, bandwidth = 0.15, functional = "max",
+                    order = 3, lag = NULL, slag = NULL, na.action = na.omit, 
+                    reg = c("lm", "rlm"), stl = "none", sbins = 1)
+{
+  reg <- match.arg(reg)
+  if (reg == "rlm"){
+    if (!requireNamespace("MASS"))
+      stop("reg = 'rlm' requires the MASS package")
+    reg <- MASS::rlm
+  }
+  ## data preprocessing
+  stl <- match.arg(stl, c("none", "trend", "seasonal", "both"))
+  if (!inherits(data, "data.frame")) 
+    data <- bfastpp(data, order = order, lag = lag, slag = slag, 
+                    na.action = na.action, stl = stl, sbins = sbins)
+  if (is.null(formula)) {
+    formula <- c(trend = !(stl %in% c("trend", "both")), 
+                 harmon = order > 0 & !(stl %in% c("seasonal", "both")), 
+                 lag = !is.null(lag), slag = !is.null(slag))
+    formula <- as.formula(paste("response ~", paste(names(formula)[formula], 
+                                                    collapse = " + ")))
+  }
+  ## fit 1-segment model
+  model1 <- do.call(reg, list(formula = formula, data = data))
+  ## determine optimal single breakpoint
+  if(is.null(trim)) trim <- 5 * length(coef(model1))
+  fs <- Fstats(formula, data = data, from = trim)
+  bp <- breakpoints(fs)
+  ## fit 2-segment model
+  data$segment <- breakfactor(bp)
+  levels(data$segment) <- c("1", "2")
+  formula2 <- update(update(formula, . ~ segment/(.)), . ~ . - 1)
+  model2   <- do.call(reg, list(formula = formula2, data = data) )
+  ## compute BIC values
+  bic <- c(BIC(model1), BIC(model2) + log(nrow(data)))
+  ## perform tests
+  improvement01 <- function(test) {
+    trim01 <- if(trim > 1) trim/nrow(data) else trim
+    if (test == "BIC") return(bic[2] < bic[1])
+    if (test %in% c("supF", "aveF", "expF")) 
+      return( sctest(fs, type = test)$p.value < level)
+    if (test == "supLM") 
+      return( sctest(gefp(formula, data = data), 
+                     functional = supLM(trim01))$p.value < level )
+    sctest(formula, data = data, type = test, h = bandwidth, 
+           functional = functional)$p.value < level
+  }
+  test <- structure(sapply(test, improvement01), names = test)
+  rval <- list(call = match.call(), data = data, formula = formula, 
+               breaks = as.numeric(aggregate(test)), breakpoints = bp$breakpoints,
+               # DM: Could return 0 if the breakpoint is insignificant using breakpoints=ifelse(as.numeric(aggregate(test))==0,0,bp$breakpoints)
+               test = test, model = list(model1, model2))
+  class(rval) <- "bfast01"
+  rval$confint <- .confint01(rval, level = 1 - level)
+  return(rval)
+}
+
+#' @method breakpoints bfast01
+#' @export
+breakpoints.bfast01 <- function(obj, breaks = NULL, ...) {
+  if(is.null(breaks)) breaks <- obj$breaks
+  n <- nrow(obj$data)
+  rval <- list(
+    breakpoints = if(breaks > 0) obj$breakpoints else NA,
+    RSS = if(breaks > 0) deviance(obj$model[[1]]) else deviance(obj$model[[2]]),
+    nobs = n,
+    nreg = length(coef(obj$model[[1]])),
+    call = match.call(),
+    datatsp = c(1/n, 1, n)
+  )
+  class(rval) <- "breakpoints"
+  return(rval)
+}
+
+#' @method breakdates bfast01
+#' @export
+breakdates.bfast01 <- function(obj, format.times = NULL, breaks = NULL, ...) {
+  if(is.null(breaks)) breaks <- obj$breaks
+  if(breaks > 0) obj$data$time[obj$breakpoints] else NA
+}
+
+#' @method logLik bfast01
+#' @export
+logLik.bfast01 <- function(object, breaks = NULL, ...) {
+  breaks <- .breaks01(object, breaks)
+  rval <- logLik(object$model[[breaks + 1]])
+  attr(rval, "df") <- attr(rval, "df") + breaks
+  rval
+}
+
+#' @method deviance bfast01
+#' @export
+deviance.bfast01 <- function(object, breaks = NULL, ...) {
+  breaks <- .breaks01(object, breaks)
+  deviance(object$model[[breaks + 1]])
+}
+
+#' @method model.frame bfast01
+#' @export
+model.frame.bfast01 <- function(formula, breaks = NULL, ...) model.frame(formula$model[[1]])
+
+#' @method model.matrix bfast01
+#' @export
+model.matrix.bfast01 <- function(object, breaks = NULL, ...) {
+  breaks <- .breaks01(object, breaks)
+  model.matrix(object$model[[breaks + 1]])
+}
+
+#' @method nobs bfast01
+#' @export
+nobs.bfast01 <- function(object, breaks = NULL, ...) nrow(object$data)
+
+#' @method AIC bfast01
+#' @export
+AIC.bfast01 <- function(object, breaks = NULL, ...) AIC(logLik(object, breaks = breaks), ...)
+#' @method BIC bfast01
+#' @export
+BIC.bfast01 <- function(object, breaks = NULL, ...) BIC(logLik(object, breaks = breaks), ...)
+
+#' @method coef bfast01
+#' @export
+coef.bfast01 <- function(object, breaks = NULL, ...) {
+  breaks <- .breaks01(object, breaks)
+  cf0 <- coef(object$model[[1]])
+  if(breaks < 1) return(cf0)
+  cf <- matrix(coef(object$model[[2]]), nrow = 2)
+  colnames(cf) <- names(cf0)
+  bd <- object$data$time[c(1, object$breakpoints, object$breakpoints + 1, nrow(object$data))]
+  bd <- format(round(bd, digits = 3))
+  rownames(cf) <- paste(bd[c(1, 3)], bd[c(2, 4)], sep = "--")
+  cf
+}
+
+#' @method fitted bfast01
+#' @export
+fitted.bfast01 <- function(object, breaks = NULL, ...) {
+  breaks <- .breaks01(object, breaks)
+  fitted(object$model[[breaks + 1]])
+}
+
+#' @method residuals bfast01
+#' @export
+residuals.bfast01 <- function(object, breaks = NULL, ...) {
+  breaks <- .breaks01(object, breaks)
+  residuals(object$model[[breaks + 1]])
+}
+
+#' @method predict bfast01
+#' @export
+predict.bfast01 <- function(object, newdata, breaks = NULL, ...) {
+  breaks <- .breaks01(object, breaks)
+  predict(object$model[[breaks + 1]], newdata, ...)
+}
+
+#' @method as.zoo bfast01
+#' @export
+as.zoo.bfast01 <- function(x, breaks = NULL, ...) {
+  breaks <- .breaks01(x, breaks)
+  
+  ## fitted values
+  d <- x$data
+  fit <- predict(x, newdata = d, breaks = breaks)
+  
+  ## residuals
+  res <- x$data$response - fit
+  
+  ## eliminate seasonal effects
+  if(!is.null(d$harmon)) d$harmon <- d$harmon * 0
+  if(!is.null(d$season)) d$season <- levels(d$season)[1]
+  season <- fit - predict(x, newdata = d, breaks = breaks)
+  
+  ## eliminate (auto)regressive effects
+  for(i in c("lag", "slag", "xreg")) if(!is.null(d[[i]])) d[[i]] <- d[[i]] * 0
+  reg <- fit - season - predict(x, newdata = d, breaks = breaks)
+  
+  ## compute fit = trend + season + reg
+  trend <- fit - season - reg
+  
+  ## include mean in trend instead of reg
+  m <- if(breaks > 0) tapply(reg, x$data$segment, mean)[x$data$segment] else mean(reg)
+  trend <- trend + m
+  reg <- reg - m
+  
+  rval <- cbind(x$data$response, fit, trend, season, reg, res)
+  colnames(rval) <- c("response", "fitted", "trend", "season", "reg", "residuals")
+  zoo(rval, x$data$time)
+}
+
+#' @method plot bfast01
+#' @export
+plot.bfast01 <- function(x, breaks = NULL, which = c("response", "fitted", "trend"),
+                         plot.type = "single", panel = NULL, screens = NULL,
+                         col = NULL, lwd = NULL,
+                         main = "", xlab = "Time", ylab = NULL, ci = NULL, regular = TRUE, ...)
+{
+  ## set up zoo series and select series to be plotted
+  breaks <- .breaks01(x, breaks)
+  z <- as.zoo(x, breaks = breaks)
+  which <- sapply(which, function(x) match.arg(x, colnames(z)))
+  z <- z[, which]
+  
+  ## try making intelligent guesses about default col/lwd
+  plot.type <- match.arg(plot.type, c("single", "multiple"))
+  if(is.null(col)) {
+    col0 <- c("gray", "black", "blue", "red", "green", "black")
+    if(plot.type == "single") {
+      col <- col0
+      names(col) <- c("response", "fitted", "trend", "season", "reg", "residuals")
+      col <- col[which]
+    } else {
+      col <- if(is.null(screens)) 1 else unlist(lapply(unique(screens),
+                                                       function(i) if((n <- sum(screens == i)) == 1) "black" else rep(col0, length.out = n)))
+    }
+  }
+  if(is.null(lwd)) {
+    if(plot.type == "single") {
+      lwd <- c(2, 1, 2, 1, 1, 1)
+      names(lwd) <- c("response", "fitted", "trend", "season", "reg", "residuals")
+      lwd <- lwd[which]
+    } else {
+      lwd <- 1
+    }
+  }
+  
+  ## default y-axis labels
+  if(is.null(ylab)) {
+    ylab <- which
+    for(i in seq_along(ylab)) substr(ylab[i], 1, 1) <- toupper(substr(ylab[i], 1, 1))
+    if(plot.type == "single") {
+      ylab <- paste(ylab, collapse = " / ")
+    } else {
+      if(!is.null(screens)) ylab <- sapply(unique(screens), function(i) paste(ylab[screens == i], collapse = " / "))
+    }
+  }
+  
+  ## set up panel function with confidence intervals
+  if(is.null(panel)) panel <- .make_confint_lines01(x, breaks = breaks, ci = ci)
+  
+  if(regular) z <- as.zoo(as.ts(z))
+  
+  plot(z, plot.type = plot.type, panel = panel, screens = screens,
+       col = col, lwd = lwd, main = main, xlab = xlab, ylab = ylab, ...)
+}
+
+.breaks01 <- function(object, breaks) {
+  if(is.null(breaks)) breaks <- object$breaks
+  breaks <- breaks[1]
+  if(!breaks %in% 0:1) stop("breaks can only be 0 or 1")
+  breaks
+}
+
+.make_confint_lines01 <- function(object, breaks = NULL, col = 1, lty = 2, lwd = 1, ci = list(), ...)
+{
+  breaks <- .breaks01(object, breaks)
+  if(breaks < 1) return(lines)
+  
+  function(x, y, ...) {
+    lines(x, y, ...)
+    abline(v = breakdates(object, breaks = breaks), lty = lty, col = col, lwd = lwd)
+    if(!identical(ci, FALSE)) {
+      if(!is.list(ci)) ci <- list()
+      if(is.null(ci$col)) ci$col <- 2
+      if(is.null(ci$angle)) ci$angle <- 90
+      if(is.null(ci$length)) ci$length <- 0.05
+      if(is.null(ci$code)) ci$code <- 3
+      if(is.null(ci$at)) {
+        at <- par("usr")[3:4]
+        at <- diff(at)/1.08 * 0.02 + at[1]
+      } else {
+        at <- ci$at
+      }
+      ci$at <- NULL
+      do.call("arrows", c(list(
+        x0 = object$data$time[object$confint[1]],
+        y0 = at,
+        x1 = object$data$time[object$confint[3]],
+        y1 = at),
+        ci))
+    }
+  }
+}
+
+.confint01 <- function(object, level = 0.95, het.reg = TRUE, het.err = TRUE)
+{
+  ## data and arguments
+  X <- model.matrix(object$model[[1]])
+  y <- model.response(model.frame(object$model[[1]]))
+  n <- nrow(object$data)
+  a2 <- (1 - level)/2
+  bp <- c(0, object$breakpoints, n)
+  
+  ## auxiliary functions
+  myfun <- function(x, level = 0.975, xi = 1, phi1 = 1, phi2 = 1)
+    (pargmaxV(x, xi = xi, phi1 = phi1, phi2 = phi2) - level)
+  myprod <- function(delta, mat) as.vector(crossprod(delta, mat) %*% delta)
+  
+  ## overall fits
+  res <- residuals(object$model[[2]])
+  beta <- coef(object, breaks = 1)
+  sigma1 <- sigma2 <- sum(res^2)/n
+  Q1 <- Q2 <- crossprod(X)/n
+  Omega1 <- Omega2 <- sigma1 * Q1
+  
+  ## subsample fits
+  X1 <- X[(bp[1]+1):bp[2],,drop = FALSE]
+  X2 <- X[(bp[2]+1):bp[3],,drop = FALSE]
+  y1 <- y[(bp[1]+1):bp[2]]
+  y2 <- y[(bp[2]+1):bp[3]]
+  beta1 <- beta[1,]
+  beta2 <- beta[2,]
+  if(het.reg) {
+    Q1 <- crossprod(X1)/nrow(X1)
+    Q2 <- crossprod(X2)/nrow(X2)
+  }
+  if(het.err) {
+    sigma1 <- sum(res[(bp[1]+1):(bp[2])]^2)/nrow(X1)
+    sigma2 <- sum(res[(bp[2]+1):(bp[3])]^2)/nrow(X2)
+    Omega1 <- sigma1 * Q1
+    Omega2 <- sigma2 * Q2
+  }
+  delta <- beta2 - beta1
+  
+  Oprod1 <- myprod(delta, Omega1)
+  Oprod2 <- myprod(delta, Omega2)
+  Qprod1 <- myprod(delta, Q1)
+  Qprod2 <- myprod(delta, Q2)
+  
+  xi <- if(het.reg) Qprod2/Qprod1 else 1
+  phi1 <- sqrt(Oprod1/Qprod1)
+  phi2 <- sqrt(Oprod2/Qprod2)
+  
+  p0 <- pargmaxV(0, phi1 = phi1, phi2 = phi2, xi = xi)
+  if(is.nan(p0) || p0 < a2 || p0 > (1-a2)) {
+    warning(paste("Confidence interval cannot be computed: P(argmax V <= 0) =", round(p0, digits = 4)))
+    upper <- NA
+    lower <- NA
+  } else {
+    ub <- lb <- 0
+    while(pargmaxV(ub, phi1 = phi1, phi2 = phi2, xi = xi) < (1 - a2)) ub <- ub + 1000
+    while(pargmaxV(lb, phi1 = phi1, phi2 = phi2, xi = xi) > a2) lb <- lb - 1000
+    
+    upper <- uniroot(myfun, c(0, ub), level = (1-a2), xi = xi, phi1 = phi1, phi2 = phi2)$root
+    lower <- uniroot(myfun, c(lb, 0), level = a2, xi = xi, phi1 = phi1, phi2 = phi2)$root
+    
+    upper <- upper * phi1^2 / Qprod1
+    lower <- lower * phi1^2 / Qprod1
+  }
+  
+  bp <- c(bp[2] - ceiling(upper), bp[2], bp[2] - floor(lower))
+  a2 <- round(a2 * 100, digits = 1)
+  names(bp) <- c(paste(a2, "%"), "breakpoints", paste(100 - a2, "%"))
+  bp
+}
+```
+
+```{r, echo=TRUE, message = FALSE}
+bf1_sa6 <- bfast01(ts6_rue, formula = response~trend)
+```
+
+```{r, echo=TRUE, message=FALSE}
+bf1_sa6$breaks # BFAST01 detected a break in the time series
+time(ts6_rue)[!is.na(ts6_rue)][bf1_sa6$breakpoints] # the break happened in 2000
+plot(bf1_sa6, ylab="RUE", main="TP in Study area 6", bty="n")
+```
+
+We can see a clear TP in ecosystem functioning happening in 2000. How do the trends behave before and after the TP? Let's characterize the TP we just identified.
+
+## Using BFAST01classify to characterize the detected changes
+
+Besides detecting abrupt changes, BFAST01 can also classify them based on the fitted trends before and after the TP. You just need to provide a `bf1` object to the `bfast01classify` function and *voila*!
+
+```{r, echo=TRUE, message = FALSE}
+bfast01classify(bf1_sa6, typology = "drylands")
+```
+
+The `flag_type` 3 indicates that we have an "Interrupted increase" in ecosystem functioning, and `flag_subtype` 2 means that the increase rate is higher after the TP, i.e., we have an "Accelerating interrupted increase". Below you can find a table with information about the different types and subtypes of ecosystem functioning change. For more information, have a look at [Bernardino et al. (2020)]().
+
+![](figs/Table1.png){width=78%}
+
+```{block type="alert alert-info"}
+**Protip**: Note that we used `typology = "drylands"`. This typology provides a type and a subtype of changes. While the type provides information about the direction of change before and after the break, the subtype tells us about the rate of change before/after the break and the status of a reversal in trends direction. Thus, we have extra information when compared to the `"standard"` typology of `BFAST01`. 
+```
+
+# The other study areas
+
+We successfully detected and characterized a TP in the sixth study area. What about the others? First of all, let's have a look at where our study areas are located, using the downloaded shapefile containing global administrative borders and the data frame with coordinates of our study areas.
+
+```{r, echo=TRUE, message = FALSE}
+coordinates # print coordinates 
+```
+
+```{r, message = FALSE}
+world_brd <- readOGR("data/TM_WORLD_BORDERS_SIMPL-0.3.shp") # load shapefile with countries' administrative borders
+ndvi_Dec2015 <- raster("data/GIMMS_NDVI_drylands_Dec2015.tif") # raster with NDVI values in December 2015, to be used as a background map
+plot(ndvi_Dec2015)
+plot(world_brd, add = TRUE)
+
+## Convert coordinates into a spatialPointsDataFrame
+coordinates <- coordinates[,c(2,1)] # invert order of Lon and Lat
+study_areas <- SpatialPointsDataFrame(coordinates, data = data.frame(study_area = c(1:6)), proj4string = CRS(proj4string(ndvi_Dec2015)))
+
+plot(study_areas, add = T, col = "red", cex = 1.1)
+text(study_areas, labels = as.character(study_areas@data$study_area), col = "red", halo = TRUE, pos = 3, cex = 1.5)
+```
+
+Now let's retrieve the name of the country where our sixth study area is located.
+
+```{r, message=FALSE}
+country_area6 <- extract(world_brd, study_areas[study_areas@data$study_area==6,])
+as.character(country_area6$NAME)
+```
+
+# Exercises
+
+```{block, type="alert alert-success"}
+> **Question 2**: Apply the method presented in the tutorial to detect and characterize TPs in ecosystem functioning in study areas 1 to 5. What are the types, subtypes, and time of TP occurrence for each?
+```
+
+
+```{block, type="alert alert-success"}
+> **Question 3**:  Determine in which countries the study areas are located. Based on the characterization done in the previous question, in which of the study area countries do you see an increase in ecosystem functioning? And in which ones do you see degradation?  
+```
+
+
+```{block, type="alert alert-success"}
+> **Question 4**:  Based on the comparison of vegetation productivity (NDVI small integral) and precipitation trends, as proposed by [Horion et al., (2016)](https://doi.org/10.1111/gcb.13267), try to determine if the ecosystem at each study area is under high or low anthropogenic influence.
+```
+
+
+
+
+
+
+
+<br><br>
+<br><br>
+<a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-sa/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>.
+
